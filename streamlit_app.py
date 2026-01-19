@@ -30,21 +30,14 @@ def connect():
     try:
         conn = configuration()
         if conn is None:
+            st.error("❌ Database connection failed")
             return None
         if conn.open:
             print("Connection completed")
         return conn
     except Error as e:
-        print("Error occurred when opening connection:", e)
-
-# Function to use the selected database
-def use_database(conn, query_database):
-    with conn.cursor() as c:
-        try:
-            c.execute(query_database)
-            print("Using the selected database")
-        except Error as e:
-            print("Error occurred when selecting database:", e)
+        st.error(f"Database error: {e}")
+        return None
 
 # Function to fetch distinct values (like state names)
 def fetch_distinct_value(conn, query_distinct):
@@ -91,17 +84,15 @@ def fetch_filtered_value(conn, query_filtered_value):
 
 # Close the database connection
 def close_connection(conn):
-    try:
-        conn.close()
-        print("Connection closed successfully")
-    except Error as e:
-        print("Error occurred when closing the connection:", e)
+    if conn:
+        try:
+            conn.close()
+            print("Connection closed successfully")
+        except Error as e:
+            print("Error occurred when closing the connection:", e)
 
 # Connect to the database
 conn = connect()
-
-# Use the database
-use_database(conn, "USE red_bus;")
 
 # Setting page configuration for Streamlit
 st.set_page_config(
@@ -142,6 +133,8 @@ if st.session_state.page == "home":
 elif st.session_state.page == "search":
     st.title(":red[REDBUS] - 🔍 Search Bus")
     
+    route_name = '--- Select Route ---'   # ✅ IMPORTANT FIX
+
     col1, col2 = st.columns([4, 1])
 
     with col1:
@@ -150,32 +143,41 @@ elif st.session_state.page == "search":
         state_name = st.selectbox("State", ['--- Select State ---'] + state_names)
 
         if state_name != '--- Select State ---':
-            route_query = f"SELECT route_name FROM route_data WHERE state_name = '{state_name}';"
+            route_query = f"""
+                SELECT route_name 
+                FROM route_data 
+                WHERE state_name = '{state_name}';
+            """
             route_names = fetch_route_names(conn, route_query)
             route_name = st.selectbox("Route", ['--- Select Route ---'] + route_names)
 
     with col2:
         bus_types_query = "SELECT DISTINCT bus_type FROM bus_data;"
         bus_types = fetch_distinct_value(conn, bus_types_query)
-        bus_type = st.selectbox("Bus Type", ['--- Select Bus Type ---'] + bus_types)
+        bus_type = st.selectbox("Bus Type", ['All'] + bus_types)
 
-        price_range = st.slider("Price Range", min_value=0, max_value=3000, value=(0, 3000), step=100)
+        price_range = st.slider("Price Range", 0, 3000, (0, 3000), 100)
         min_price, max_price = price_range
 
-        rating = st.slider("Star Rating", min_value=0, max_value=5, value=(0, 5), step=1)
+        rating = st.slider("Star Rating", 0, 5, (0, 5), 1)
         min_rating, max_rating = rating
+
+    # ✅ VALIDATION
+    if state_name == '--- Select State ---' or route_name == '--- Select Route ---':
+        st.warning("⚠️ Please select State and Route")
+        st.stop()
 
     if st.button("Search"):
         query = f"""
         SELECT r.route_name, r.route_link, b.bus_name, b.bus_type, b.departing_time, 
-                b.duration, b.reaching_time, b.star_rating, b.price, b.seat_available
+               b.duration, b.reaching_time, b.star_rating, b.price, b.seat_available
         FROM route_data r
         JOIN bus_data b ON r.route_no = b.bus_no
         WHERE r.state_name = '{state_name}' 
-        AND r.route_name = '{route_name}' 
-        AND (b.bus_type = '{bus_type}' OR '{bus_type}' = 'All') 
-        AND b.star_rating BETWEEN {min_rating} AND {max_rating}
-        AND b.price BETWEEN {min_price} AND {max_price};
+          AND r.route_name = '{route_name}' 
+          AND (b.bus_type = '{bus_type}' OR '{bus_type}' = 'All') 
+          AND b.star_rating BETWEEN {min_rating} AND {max_rating}
+          AND b.price BETWEEN {min_price} AND {max_price};
         """
 
         with st.spinner('Searching...'):
@@ -186,6 +188,7 @@ elif st.session_state.page == "search":
             st.dataframe(filtered_data)
         else:
             st.markdown("<h4>Sorry, no buses found for the selected filters</h4>", unsafe_allow_html=True)
+
 
 # Close the database connection at the end
 close_connection(conn)
